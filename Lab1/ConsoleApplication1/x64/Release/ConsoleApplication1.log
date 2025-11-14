@@ -1,0 +1,8 @@
+﻿  ConsoleApplication1.cpp
+C:\Users\ponya\source\repos\Lab1\ConsoleApplication1\ConsoleApplication1.cpp(43,29): warning C4267: инициализация: преобразование из "size_t" в "unsigned int"; возможна потеря данных
+  Создание кода
+  118 of 120 functions (98.3%) were compiled, the rest were copied from previous compilation.
+    3 functions were new in current compilation
+    1 functions had inline decision re-evaluated but remain unchanged
+  Создание кода завершено
+  ConsoleApplication1.vcxproj -> C:\Users\ponya\source\repos\Lab1\x64\Release\ConsoleApplication1.exe
