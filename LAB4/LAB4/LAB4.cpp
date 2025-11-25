@@ -1,121 +1,169 @@
 ﻿#include <iostream>
 #include <thread>
 #include <mutex>
+#include <chrono>
 #include <vector>
 #include <atomic>
-#include <chrono>
 
-const int NUM_DAYS = 5;
-const int MAX_NUGGETS_PER_FATMAN = 10000;
+// Глобальные переменные
+std::mutex table_mutex;
+std::atomic<bool> stop_simulation{ false };
+std::atomic<int> total_nuggets_eaten[3]{ 0 }; // Сколько съел каждый толстяк
+int dish[3] = { 3000, 3000, 3000 }; // начальные тарелки
+std::atomic<int> fatmen_destroyed{ 0 };
 
-std::mutex mtx;
-std::vector<int> plates = { 3000, 3000, 3000 };
-std::atomic<bool> cook_fired(false);
-std::atomic<int> fatmen_eaten[3] = { 0, 0, 0 };
-std::atomic<bool> has_exploded[3] = { false, false, false };
-std::atomic<int> exploded_count(0);
-std::atomic<bool> time_up(false);
-std::atomic<bool> time_is_up(false);
+// Константы, задаваемые перед запуском
+int gluttony = 3;
+int efficiency_factor = 3;
 
-void fatman(int id, int gluttony) {
-    while (!cook_fired.load() && !time_is_up.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        std::lock_guard<std::mutex> lock(mtx);
+// Флаги состояния
+std::atomic<int> eaters_done_count{ 0 };
+std::atomic<bool> cook_just_added{ false };
+std::atomic<bool> eaters_finished{ false };
 
-        if (cook_fired.load() || time_is_up.load())
-            return;
-
-        if (plates[id] <= 0) {
-            cook_fired = true;
-            return;
+void cook_thread() {
+    auto start_time = std::chrono::steady_clock::now();
+    while (!stop_simulation) {
+        {
+            std::lock_guard<std::mutex> lock(table_mutex);
+            int per_plate = efficiency_factor / 3;
+            int remainder = efficiency_factor % 3;
+            for (int i = 0; i < 3; ++i) {
+                dish[i] += per_plate + (i < remainder ? 1 : 0);
+            }
+            cook_just_added = true;
+            eaters_finished = false;
+            eaters_done_count = 0; // сброс перед новым раундом
         }
 
-        int to_eat = std::min(gluttony, plates[id]);
-        plates[id] -= to_eat;
-        fatmen_eaten[id] += to_eat;
-
-       
-        if (!has_exploded[id] && fatmen_eaten[id] >= MAX_NUGGETS_PER_FATMAN) {
-            has_exploded[id] = true;
-            exploded_count++;
+        // Ждём, пока активные толстяки поедят (ограничено по времени)
+        auto wait_start = std::chrono::steady_clock::now();
+        while (!eaters_finished && !stop_simulation) {
+            if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - wait_start).count() > 5) {
+                // Защита от зависания
+                break;
+            }
+            std::this_thread::yield();
         }
-    }
-}
+        cook_just_added = false;
 
-void cook(int efficiency_factor) {
-    auto start = std::chrono::steady_clock::now();
-    const auto duration = std::chrono::seconds(NUM_DAYS);
-
-    while (!cook_fired.load()) {
-        auto now = std::chrono::steady_clock::now();
-        if (now - start >= duration) {
+        if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time).count() >= 5) {
+            // Не ставим stop_simulation сразу — дадим завершиться текущему раунду
             break;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        if (cook_fired.load()) break;
 
-        std::lock_guard<std::mutex> lock(mtx);
-        if (cook_fired.load()) break;
-
-        for (int i = 0; i < 3; ++i) {
-            plates[i] += efficiency_factor;
-        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    time_is_up = true; // даём сигнал толстякам остановиться
+    // После выхода из цикла — сигнал к завершению
+    stop_simulation = true;
 }
 
-void run_simulation(int gluttony, int efficiency_factor, const std::string& name) {
-    //сброс параметров
-    plates = { 3000, 3000, 3000 };
-    cook_fired = false;
-    time_is_up = false;
-    exploded_count = 0;
-    for (int i = 0; i < 3; ++i) has_exploded[i] = false;
-    for (int i = 0; i < 3; ++i) fatmen_eaten[i] = 0;
-    
+void fatman_thread(int id) {
+    while (!stop_simulation) {
+        // Ждём, пока Кук выложит (если повар ещё работает)
+        while (!cook_just_added && !stop_simulation) {
+            std::this_thread::yield();
+        }
+        if (stop_simulation) break;
 
-    std::cout << "\n=== " << name << " ===\n";
+        bool destroyed_or_starved = false;
+        {
+            std::lock_guard<std::mutex> lock(table_mutex);
+            if (dish[id] >= gluttony) {
+                dish[id] -= gluttony;
+                total_nuggets_eaten[id] += gluttony;
+                if (total_nuggets_eaten[id] >= 10000) {
+                    std::cout << "Толстяк " << id + 1 << " самоуничтожился!\n";
+                    fatmen_destroyed++;
+                    destroyed_or_starved = true;
+                }
+            }
+            else {
+                std::cout << "У толстяка " << id + 1 << " закончились наггетсы! Кука уволили.\n";
+                destroyed_or_starved = true;
+            }
+        }
+
+        if (destroyed_or_starved) {
+            // Этот толстяк больше не участвует
+            return;
+        }
+
+        // Учёт завершения еды этим толстяком
+        int prev = eaters_done_count.fetch_add(1);
+        if (prev == 2) {
+            eaters_done_count = 0;
+            eaters_finished = true;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+void run_simulation(int g, int e, const std::string& scenario_name) {
+    // Сброс глобальных переменных
+    stop_simulation = false;
+    fatmen_destroyed = 0;
+    for (int i = 0; i < 3; ++i) {
+        total_nuggets_eaten[i] = 0;
+        dish[i] = 3000;
+    }
+    cook_just_added = false;
+    eaters_finished = false;
+
+    gluttony = g;
+    efficiency_factor = e;
+
+    std::cout << "\n=== " << scenario_name << " ===\n";
     std::cout << "gluttony = " << gluttony << ", efficiency_factor = " << efficiency_factor << "\n";
 
-    std::thread t_cook(cook, efficiency_factor);
-    std::thread t1(fatman, 0, gluttony);
-    std::thread t2(fatman, 1, gluttony);
-    std::thread t3(fatman, 2, gluttony);
+    std::thread cook(cook_thread);
+    std::thread fatmen[3] = {
+        std::thread(fatman_thread, 0),
+        std::thread(fatman_thread, 1),
+        std::thread(fatman_thread, 2)
+    };
 
-    t_cook.join();
-    t1.join();
-    t2.join();
-    t3.join();
-
-    // Определяем результат
-    if (cook_fired) {
-        std::cout << "Результат: Кука уволили\n";
+    // Ждём завершения симуляции (по любому условию)
+    while (!stop_simulation) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    else if (exploded_count == 3) {
-        std::cout << "Результат: Кук не получил зарплату\n";
+
+    // Завершаем потоки
+    cook.join();
+    for (int i = 0; i < 3; ++i) {
+        fatmen[i].join();
+    }
+
+    // Теперь определяем результат ПОСЛЕ полного завершения
+    bool someone_starved = false;
+    for (int i = 0; i < 3; ++i) {
+        if (total_nuggets_eaten[i] < 10000 && dish[i] < gluttony) {
+            someone_starved = true;
+        }
+    }
+
+    if (fatmen_destroyed == 3) {
+        std::cout << "РЕЗУЛЬТАТ: Кук не получил зарплату (все толстяки самоуничтожились).\n";
+    }
+    else if (someone_starved) {
+        std::cout << "РЕЗУЛЬТАТ: Кука уволили (закончились наггетсы у кого-то).\n";
     }
     else {
-        std::cout << "Результат: Кук уволился сам\n";
+        std::cout << "РЕЗУЛЬТАТ: Кук уволился сам (прошло 5 дней).\n";
     }
 
-    std::cout << "На тарелках: ";
-    for (int p : plates) std::cout << p << " ";
-    std::cout << "\nСъедено: ";
-    for (int i = 0; i < 3; i++) std::cout << fatmen_eaten[i] << " ";
-    std::cout << "\nВзорвалось: " << exploded_count << "\n";
+    // Вывод итогов по каждому толстяку
+    for (int i = 0; i < 3; ++i) {
+        std::cout << "Толстяк " << i + 1 << " съел: " << total_nuggets_eaten[i] << " наггетсов\n";
+    }
 }
 
 int main() {
     setlocale(LC_ALL, "RU");
-
-    // Условие 1: Увольнение - толстяки едят быстрее чем повар успевает пополнять
-    run_simulation(500, 50, "Условие 1: Увольнение");
-
-    // Условие 2: Нет зарплаты - некому платить, потому что толстяки лопнули))
-    run_simulation(300, 800, "Условие 2: Кук не получил зарплату");
-
-    // Условие 3: Увольняется сам, т.к. за 5 дней (5 сек компа) никто не лопнул и тарелки не опустели
-    run_simulation(200, 500, "Условие 3: Увольняется сам");
+    run_simulation(100, 10, "Сценарий 1: Кука уволили");
+    run_simulation(100, 1000, "Сценарий 2: Кук не получил зарплату");
+    run_simulation(20, 40, "Сценарий 3: Кук уволился сам");
 
     return 0;
 }
