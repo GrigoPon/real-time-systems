@@ -1,18 +1,40 @@
 ﻿#include <iostream>
 #include <thread>
-#include <mutex>
 #include <chrono>
 #include <vector>
 #include <atomic>
+#include <mutex>
+
+// Собственный мьютекс на основе атомарных переменных
+class MyMutex {
+    std::atomic<bool> locked{ false };
+
+public:
+    void lock() {
+        bool expected = false;
+        while (!locked.compare_exchange_strong(expected, true)) {
+            expected = false;
+            std::this_thread::yield();
+        }
+    }
+
+    void unlock() {
+        locked.store(false, std::memory_order_release);
+    }
+
+    MyMutex() = default;
+    MyMutex(const MyMutex&) = delete;
+    MyMutex& operator=(const MyMutex&) = delete;
+};
 
 // Глобальные переменные
-std::mutex table_mutex;
+MyMutex table_mutex; // заменено
 std::atomic<bool> stop_simulation{ false };
-std::atomic<int> total_nuggets_eaten[3]{ 0 }; // Сколько съел каждый толстяк
-int dish[3] = { 3000, 3000, 3000 }; // начальные тарелки
+std::atomic<int> total_nuggets_eaten[3]{ 0 };
+int dish[3] = { 3000, 3000, 3000 };
 std::atomic<int> fatmen_destroyed{ 0 };
 
-// Константы, задаваемые перед запуском
+// Константы задаваемые перед запуском 
 int gluttony = 3;
 int efficiency_factor = 3;
 
@@ -21,11 +43,12 @@ std::atomic<int> eaters_done_count{ 0 };
 std::atomic<bool> cook_just_added{ false };
 std::atomic<bool> eaters_finished{ false };
 
+
 void cook_thread() {
     auto start_time = std::chrono::steady_clock::now();
     while (!stop_simulation) {
         {
-            std::lock_guard<std::mutex> lock(table_mutex);
+            std::lock_guard<MyMutex> lock(table_mutex); // заменено
             int per_plate = efficiency_factor / 3;
             int remainder = efficiency_factor % 3;
             for (int i = 0; i < 3; ++i) {
@@ -33,13 +56,14 @@ void cook_thread() {
             }
             cook_just_added = true;
             eaters_finished = false;
-            eaters_done_count = 0; // сброс перед новым раундом
+            eaters_done_count = 0;
         }
 
         // Ждём, пока активные толстяки поедят (ограничено по времени)
         auto wait_start = std::chrono::steady_clock::now();
         while (!eaters_finished && !stop_simulation) {
-            if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - wait_start).count() > 5) {
+            if (std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::steady_clock::now() - wait_start).count() > 5) {
                 // Защита от зависания
                 break;
             }
@@ -47,16 +71,19 @@ void cook_thread() {
         }
         cook_just_added = false;
 
-        if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time).count() >= 5) {
+        if (std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::steady_clock::now() - start_time).count() >= 5) {
             // Не ставим stop_simulation сразу — дадим завершиться текущему раунду
             break;
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
+
     // После выхода из цикла — сигнал к завершению
     stop_simulation = true;
 }
+
 
 void fatman_thread(int id) {
     while (!stop_simulation) {
@@ -68,7 +95,7 @@ void fatman_thread(int id) {
 
         bool destroyed_or_starved = false;
         {
-            std::lock_guard<std::mutex> lock(table_mutex);
+            std::lock_guard<MyMutex> lock(table_mutex); // заменено
             if (dish[id] >= gluttony) {
                 dish[id] -= gluttony;
                 total_nuggets_eaten[id] += gluttony;
@@ -99,6 +126,7 @@ void fatman_thread(int id) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
+
 
 void run_simulation(int g, int e, const std::string& scenario_name) {
     // Сброс глобальных переменных
@@ -159,11 +187,11 @@ void run_simulation(int g, int e, const std::string& scenario_name) {
     }
 }
 
+
 int main() {
     setlocale(LC_ALL, "RU");
     run_simulation(100, 10, "Сценарий 1: Кука уволили");
     run_simulation(100, 1000, "Сценарий 2: Кук не получил зарплату");
     run_simulation(20, 40, "Сценарий 3: Кук уволился сам");
-
     return 0;
 }

@@ -14,24 +14,24 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 1,
+          "SelectedChildIndex": 0,
           "Children": [
-            {
-              "$type": "Bookmark",
-              "Name": "ST:0:0:{cce594b6-0c39-4442-ba28-10c64ac7e89f}"
-            },
             {
               "$type": "Document",
               "DocumentIndex": 0,
               "Title": "LAB4.cpp",
               "DocumentMoniker": "C:\\Users\\ponya\\source\\repos\\LAB4\\LAB4\\LAB4.cpp",
               "RelativeDocumentMoniker": "LAB4\\LAB4.cpp",
-              "ToolTip": "C:\\Users\\ponya\\source\\repos\\LAB4\\LAB4\\LAB4.cpp*",
-              "RelativeToolTip": "LAB4\\LAB4.cpp*",
-              "ViewState": "AgIAAGkAAAAAAAAAAAAAAKgAAAABAAAAAAAAAA==",
+              "ToolTip": "C:\\Users\\ponya\\source\\repos\\LAB4\\LAB4\\LAB4.cpp",
+              "RelativeToolTip": "LAB4\\LAB4.cpp",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAABAAAAAmAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
               "WhenOpened": "2025-11-20T14:57:12.8Z",
               "EditorCaption": ""
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{cce594b6-0c39-4442-ba28-10c64ac7e89f}"
             }
           ]
         }
